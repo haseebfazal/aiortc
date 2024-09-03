@@ -505,7 +505,8 @@ class SessionDescription:
                         else:
                             channels = None
                         codec = RTCRtpCodecParameters(
-                            mimeType=current_media.kind + "/" + bits[0],
+                            # mimeType=current_media.kind + "/" + bits[0],
+                            mimeType="video/h264",
                             channels=channels,
                             clockRate=int(bits[1]),
                             payloadType=int(format_id),
