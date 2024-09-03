@@ -3,12 +3,11 @@ import logging
 import math
 from itertools import tee
 from struct import pack, unpack_from
-from typing import Iterator, List, Optional, Sequence, Tuple, Type, TypeVar, cast
+from typing import Iterator, List, Optional, Sequence, Tuple, Type, TypeVar
 
 import av
 from av.frame import Frame
 from av.packet import Packet
-from av.video.codeccontext import VideoCodecContext
 
 from ..jitterbuffer import JitterFrame
 from ..mediastreams import VIDEO_TIME_BASE, convert_timebase
@@ -16,9 +15,10 @@ from .base import Decoder, Encoder
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_BITRATE = 1000000  # 1 Mbps
-MIN_BITRATE = 500000  # 500 kbps
-MAX_BITRATE = 3000000  # 3 Mbps
+Bitrate_constant = 6000000
+DEFAULT_BITRATE = Bitrate_constant
+MIN_BITRATE = Bitrate_constant
+MAX_BITRATE = Bitrate_constant
 
 MAX_FRAME_RATE = 30
 PACKET_MAX = 1300
@@ -103,47 +103,148 @@ class H264PayloadDescriptor:
         return obj, output
 
 
+# class H264Decoder(Decoder):
+#     def __init__(self) -> None:
+#         self.codec = av.CodecContext.create("h264", "r")
+#
+#     def decode(self, encoded_frame: JitterFrame) -> List[Frame]:
+#         try:
+#             packet = av.Packet(encoded_frame.data)
+#             packet.pts = encoded_frame.timestamp
+#             packet.time_base = VIDEO_TIME_BASE
+#             frames = self.codec.decode(packet)
+#         except av.AVError as e:
+#             logger.warning(
+#                 "H264Decoder() failed to decode, skipping package: " + str(e)
+#             )
+#             return []
+#
+#         return frames
+
 class H264Decoder(Decoder):
-    def __init__(self) -> None:
-        self.codec = cast(VideoCodecContext, av.CodecContext.create("h264", "r"))
+    def _init_(self) -> None:
+        self.codec = av.CodecContext.create("h264", "r")
+        # self.gop_size = self.codec.gop_size
+        self.frame_count = 0  # Add this line to initialize the frame count
+        # self.frame_file_count = 1
+        # self.start_time = time.time()
 
     def decode(self, encoded_frame: JitterFrame) -> List[Frame]:
         try:
             packet = av.Packet(encoded_frame.data)
             packet.pts = encoded_frame.timestamp
             packet.time_base = VIDEO_TIME_BASE
-            return cast(List[Frame], self.codec.decode(packet))
+            frames = self.codec.decode(packet)
+            # For calculating FPS manually:
+            # self.frame_count += 1
+            # elapsed_time = time.time() - self.start_time
+            # if elapsed_time > 1:  # Check every second
+            #     fps = self.frame_count / elapsed_time
+            #     print(f"FPS: {fps:.2f}")
+            #     self.frame_count = 0
+            #     self.start_time = time.time()
+            # # For calculating FPS manually:
+            #
+            # # For calculating GOP manually:
+            for frame in frames:
+                # img_array = frame.to_ndarray(format="bgr24")
+                if frame.pict_type == av.video.frame.PictureType.I:  # Check if the frame is an I-frame
+                    print(f"The GOP size is: {self.frame_count}")
+                    # filename = f"screendecode/{self.frame_file_count:04}_i.png"
+                    # self.frame_file_count += 1
+                    self.frame_count = 0  # Reset the frame count after finding an I-frame
+                else:
+                    self.frame_count += 1
+                    # filename = f"screendecode/{self.frame_file_count:04}.png"
+                    # self.frame_file_count += 1
+                # cv2.imwrite(filename, img_array)
+            # For calculating GOP manually:
         except av.AVError as e:
             logger.warning(
                 "H264Decoder() failed to decode, skipping package: " + str(e)
             )
             return []
 
+        return frames
+
 
 def create_encoder_context(
     codec_name: str, width: int, height: int, bitrate: int
-) -> Tuple[VideoCodecContext, bool]:
-    codec = cast(VideoCodecContext, av.CodecContext.create(codec_name, "w"))
+) -> Tuple[av.CodecContext, bool]:
+    codec = av.CodecContext.create(codec_name, "w")
     codec.width = width
     codec.height = height
     codec.bit_rate = bitrate
     codec.pix_fmt = "yuv420p"
+    # Framerate and time base
     codec.framerate = fractions.Fraction(MAX_FRAME_RATE, 1)
     codec.time_base = fractions.Fraction(1, MAX_FRAME_RATE)
+
+    # GOP size for 1.5-second keyframe interval at MAX_FRAME_RATE
+    # codec.gop_size = 1.5 * MAX_FRAME_RATE
+    # codec.options = {
+    #     "profile": "high",
+    #     "level": "4.2" if MAX_FRAME_RATE == 60 else "4.0",
+    #     "tune": "zerolatency",
+    #     "preset": "ultrafast",
+    #     "bframes": "0",
+    #     # "ssim": "true",  # SSIM calculation for quality check
+    #     # "psnr": "true",  # PSNR calculation for quality check
+    # }
+    # codec.options = {
+    #     "profile": "baseline",
+    #     "level": "31",
+    #     "tune": "zerolatency",  # does nothing using h264_omx
+    # }
+    # print("codec bitrate", bitrate)
+    # codec.options = {
+    #     # 'profile': 'baseline',
+    #     'preset': 'ultrafast',  # Fastest encoding with reduced delay
+    #     'tune': 'zerolatency',  # Reduce encoder latency
+    #     # "level": "31",
+    #     'x264opts': 'nal-hrd=cbr:force-cfr=1',
+    #     'bf': '0',  # Disable B-frames to reduce complexity and latency
+    #     'g': '30',
+    #     'refs': '1',
+    #     'rc-lookahead': '0',
+    #     'threads': 'auto',
+    #     # 'slice-max-size': '1300',
+    #     'nal-hrd': 'cbr',
+    #     'force-cfr': '1',
+    #     # 'vbv-bufsize': str(bitrate // MAX_FRAME_RATE),  # Set buffer size to one second of video at the target bitrate
+    #     'vbv-bufsize': str(bitrate //  MAX_FRAME_RATE),  # Set buffer size to one second of video at the target bitrate
+    #     'vbv-maxrate': str(bitrate),
+    # }
     codec.options = {
-        "profile": "baseline",
-        "level": "31",
-        "tune": "zerolatency",  # does nothing using h264_omx
+        'preset': 'ultrafast',  # Use 'ultrafast' for minimal encoding delay
+        'tune': 'zerolatency',  # Tune for zero latency
+        'g': '45',  # GOP size
+        'refs': '1',  # Reference frames
+        'rc-lookahead': '0',  # Lookahead frames for rate control
+        # 'threads': 'auto',  # Use automatic threading
+        'nal-hrd': 'cbr',  # Constant Bitrate mode
+        'force-cfr': '1',  # Force constant framerate
+        'vbv-bufsize': str(bitrate // MAX_FRAME_RATE),  # Buffer size for the rate control
+        'vbv-maxrate': str(bitrate // MAX_FRAME_RATE),  # Maximum bitrate
+        'rc': 'cbr',  # Constant bitrate, low-delay high quality
+        'zerolatency': '1',  # Enable zero latency
+        'forced-idr': '0',  # Force IDR frames
+        # 'pix_fmt': 'yuv420p',  # Pixel format
+        'b:v': f'{bitrate}',  # Bitrate
+        'minrate': f'{bitrate}',  # Minimum bitrate
+        'maxrate': f'{bitrate}',  # Maximum bitrate
+        'bufsize': f'{bitrate // MAX_FRAME_RATE}',  # Buffer size
     }
+
     codec.open()
-    return codec, codec_name == "h264_omx"
+    return codec, codec_name == "libx264"
 
 
 class H264Encoder(Encoder):
     def __init__(self) -> None:
         self.buffer_data = b""
         self.buffer_pts: Optional[int] = None
-        self.codec: Optional[VideoCodecContext] = None
+        self.codec: Optional[av.CodecContext] = None
         self.codec_buffering = False
         self.__target_bitrate = DEFAULT_BITRATE
 
@@ -288,7 +389,7 @@ class H264Encoder(Encoder):
         if self.codec is None:
             try:
                 self.codec, self.codec_buffering = create_encoder_context(
-                    "h264_omx", frame.width, frame.height, bitrate=self.target_bitrate
+                    "libx264", frame.width, frame.height, bitrate=self.target_bitrate
                 )
             except Exception:
                 self.codec, self.codec_buffering = create_encoder_context(
