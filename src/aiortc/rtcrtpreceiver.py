@@ -46,7 +46,7 @@ from .stats import (
 )
 from .utils import uint16_add, uint16_gt
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger(_name_)
 
 
 def decoder_worker(loop, input_q, output_q):
@@ -74,7 +74,7 @@ def decoder_worker(loop, input_q, output_q):
 
 
 class NackGenerator:
-    def __init__(self) -> None:
+    def _init_(self) -> None:
         self.max_seq: Optional[int] = None
         self.missing: Set[int] = set()
 
@@ -118,7 +118,7 @@ class NackGenerator:
 
 
 class StreamStatistics:
-    def __init__(self, clockrate: int) -> None:
+    def _init_(self, clockrate: int) -> None:
         self.base_seq: Optional[int] = None
         self.max_seq: Optional[int] = None
         self.cycles = 0
@@ -186,8 +186,8 @@ class StreamStatistics:
 
 
 class RemoteStreamTrack(MediaStreamTrack):
-    def __init__(self, kind: str, id: Optional[str] = None) -> None:
-        super().__init__()
+    def _init_(self, kind: str, id: Optional[str] = None) -> None:
+        super()._init_()
         self.kind = kind
         if id is not None:
             self._id = id
@@ -208,7 +208,7 @@ class RemoteStreamTrack(MediaStreamTrack):
 
 
 class TimestampMapper:
-    def __init__(self) -> None:
+    def _init_(self) -> None:
         self._last: Optional[int] = None
         self._origin: Optional[int] = None
 
@@ -227,7 +227,7 @@ class TimestampMapper:
 @dataclass
 class RTCRtpContributingSource:
     """
-    The :class:`RTCRtpContributingSource` dictionary contains information about
+    The :class:RTCRtpContributingSource dictionary contains information about
     a contributing source (CSRC).
     """
 
@@ -240,7 +240,7 @@ class RTCRtpContributingSource:
 @dataclass
 class RTCRtpSynchronizationSource:
     """
-    The :class:`RTCRtpSynchronizationSource` dictionary contains information about
+    The :class:RTCRtpSynchronizationSource dictionary contains information about
     a synchronization source (SSRC).
     """
 
@@ -252,18 +252,17 @@ class RTCRtpSynchronizationSource:
 
 class RTCRtpReceiver:
     """
-    The :class:`RTCRtpReceiver` interface manages the reception and decoding
-    of data for a :class:`MediaStreamTrack`.
+    The :class:RTCRtpReceiver interface manages the reception and decoding
+    of data for a :class:MediaStreamTrack.
 
-    :param kind: The kind of media (`'audio'` or `'video'`).
-    :param transport: An :class:`RTCDtlsTransport`.
+    :param kind: The kind of media ('audio' or 'video').
+    :param transport: An :class:RTCDtlsTransport.
     """
 
-    def __init__(self, kind: str, transport: RTCDtlsTransport) -> None:
+    def _init_(self, kind: str, transport: RTCDtlsTransport) -> None:
         if transport.state == "closed":
             raise InvalidStateError
 
-        self._enabled = True
         self.__active_ssrc: Dict[int, datetime.datetime] = {}
         self.__codecs: Dict[int, RTCRtpCodecParameters] = {}
         self.__decoder_queue: queue.Queue = queue.Queue()
@@ -303,14 +302,14 @@ class RTCRtpReceiver:
     @property
     def track(self) -> MediaStreamTrack:
         """
-        The :class:`MediaStreamTrack` which is being handled by the receiver.
+        The :class:MediaStreamTrack which is being handled by the receiver.
         """
         return self._track
 
     @property
     def transport(self) -> RTCDtlsTransport:
         """
-        The :class:`RTCDtlsTransport` over which the media for the receiver's
+        The :class:RTCDtlsTransport over which the media for the receiver's
         track is received.
         """
         return self.__transport
@@ -319,9 +318,9 @@ class RTCRtpReceiver:
     def getCapabilities(self, kind) -> Optional[RTCRtpCapabilities]:
         """
         Returns the most optimistic view of the system's capabilities for
-        receiving media of the given `kind`.
+        receiving media of the given kind.
 
-        :rtype: :class:`RTCRtpCapabilities`
+        :rtype: :class:RTCRtpCapabilities
         """
         return get_capabilities(kind)
 
@@ -329,7 +328,7 @@ class RTCRtpReceiver:
         """
         Returns statistics about the RTP receiver.
 
-        :rtype: :class:`RTCStatsReport`
+        :rtype: :class:RTCStatsReport
         """
         for ssrc, stream in self.__remote_streams.items():
             self.__stats.add(
@@ -355,7 +354,7 @@ class RTCRtpReceiver:
 
     def getSynchronizationSources(self) -> List[RTCRtpSynchronizationSource]:
         """
-        Returns a :class:`RTCRtpSynchronizationSource` for each unique SSRC identifier
+        Returns a :class:RTCRtpSynchronizationSource for each unique SSRC identifier
         received in the last 10 seconds.
         """
         cutoff = clock.current_datetime() - datetime.timedelta(seconds=10)
@@ -371,7 +370,7 @@ class RTCRtpReceiver:
         """
         Attempt to set the parameters controlling the receiving of media.
 
-        :param parameters: The :class:`RTCRtpParameters` for the receiver.
+        :param parameters: The :class:RTCRtpParameters for the receiver.
         """
         if not self.__started:
             for codec in parameters.codecs:
@@ -451,10 +450,6 @@ class RTCRtpReceiver:
         """
         self.__log_debug("< %s", packet)
 
-        # If the receiver is disabled, discard the packet.
-        if not self._enabled:
-            return
-
         # feed bitrate estimator
         if self.__remote_bitrate_estimator is not None:
             if packet.extensions.abs_send_time is not None:
@@ -506,7 +501,7 @@ class RTCRtpReceiver:
             )
 
         # send NACKs for any missing any packets
-        if self.__nack_generator is not None and self.__nack_generator.add(packet):
+        if self._nack_generator is not None and self._nack_generator.add(packet):
             await self._send_rtcp_nack(
                 packet.ssrc, sorted(self.__nack_generator.missing)
             )
