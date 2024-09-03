@@ -96,6 +96,7 @@ class RTCRtpSender:
         self.__started = False
         self.__stats = RTCStatsReport()
         self.__transport = transport
+        # self.__frame_counter = 0  # Add a frame counter
 
         # stats
         self.__lsr: Optional[int] = None
@@ -104,7 +105,8 @@ class RTCRtpSender:
         self.__rtp_timestamp = 0
         self.__octet_count = 0
         self.__packet_count = 0
-        self.__rtt: Optional[float] = None
+        self.__rtt = None
+        self.lastBitrateEstimate = 0
 
         # logging
         self.__log_debug: Callable[..., None] = lambda *args: None
@@ -196,8 +198,8 @@ class RTCRtpSender:
             # make note of RTX payload type
             for codec in parameters.codecs:
                 if (
-                    is_rtx(codec)
-                    and codec.parameters["apt"] == parameters.codecs[0].payloadType
+                        is_rtx(codec)
+                        and codec.parameters["apt"] == parameters.codecs[0].payloadType
                 ):
                     self.__rtx_payload_type = codec.payloadType
                     break
@@ -206,7 +208,7 @@ class RTCRtpSender:
             self.__rtcp_task = asyncio.ensure_future(self._run_rtcp())
             self.__started = True
 
-    async def stop(self) -> None:
+    async def stop(self):
         """
         Irreversibly stop the sender.
         """
@@ -219,7 +221,7 @@ class RTCRtpSender:
             self.__rtcp_task.cancel()
             await asyncio.gather(self.__rtp_exited.wait(), self.__rtcp_exited.wait())
 
-    async def _handle_rtcp_packet(self, packet) -> None:
+    async def _handle_rtcp_packet(self, packet):
         if isinstance(packet, (RtcpRrPacket, RtcpSrPacket)):
             for report in filter(lambda x: x.ssrc == self._ssrc, packet.reports):
                 # estimate round-trip time
@@ -229,6 +231,11 @@ class RTCRtpSender:
                         self.__rtt = rtt
                     else:
                         self.__rtt = RTT_ALPHA * self.__rtt + (1 - RTT_ALPHA) * rtt
+
+                print("RTT Time: ", self.__rtt)
+                print("Packets Received: ", self.__packet_count - report.packets_lost)
+                print("Packets Lost: ", report.packets_lost)
+                print("Jitter: ", report.jitter)
 
                 self.__stats.add(
                     RTCRemoteInboundRtpStreamStats(
@@ -263,13 +270,12 @@ class RTCRtpSender:
                     )
                     if self.__encoder and hasattr(self.__encoder, "target_bitrate"):
                         self.__encoder.target_bitrate = bitrate
+
             except ValueError:
                 pass
 
-    async def _next_encoded_frame(
-        self, codec: RTCRtpCodecParameters
-    ) -> Optional[RTCEncodedFrame]:
-        # Get [Frame|Packet].
+    async def _next_encoded_frame(self, codec: RTCRtpCodecParameters):
+        # get [Frame|Packet]
         data = await self.__track.recv()
 
         # If the sender is disabled, drop the frame instead of encoding it.
@@ -284,7 +290,7 @@ class RTCRtpSender:
             self.__encoder = get_encoder(codec)
 
         if isinstance(data, Frame):
-            # Encode the frame.
+            # encode frame
             if isinstance(data, AudioFrame):
                 audio_level = rtp.compute_audio_level_dbov(data)
 
@@ -294,15 +300,46 @@ class RTCRtpSender:
                 None, self.__encoder.encode, data, force_keyframe
             )
         else:
-            # Pack the pre-encoded data.
             payloads, timestamp = self.__encoder.pack(data)
 
-        # If the encoder did not return any payloads, return `None`.
-        # This may be due to a delay caused by resampling.
-        if not payloads:
-            return None
-
         return RTCEncodedFrame(payloads, timestamp, audio_level)
+
+    # async def _next_encoded_frame(self, codec: RTCRtpCodecParameters):
+    #     # get [Frame|Packet]
+    #     data = await self.__track.recv()
+    #
+    #     # If the sender is disabled, drop the frame instead of encoding it.
+    #     # We still want to read from the track in order to avoid frames
+    #     # accumulating in memory.
+    #     if not self._enabled:
+    #         return None
+    #
+    #     audio_level = None
+    #
+    #     if self.__encoder is None:
+    #         self.__encoder = get_encoder(codec)
+    #
+    #     if isinstance(data, Frame):
+    #         # encode frame
+    #         if isinstance(data, AudioFrame):
+    #             audio_level = rtp.compute_audio_level_dbov(data)
+    #
+    #         self.__frame_counter += 1  # Increment the frame counter
+    #
+    #         # Force keyframe every 30 frames
+    #         if self.__frame_counter >= 10:
+    #             self.__force_keyframe = True
+    #             self.__frame_counter = 0  # Reset the counter
+    #
+    #         force_keyframe = self.__force_keyframe
+    #         self.__force_keyframe = False
+    #         payloads, timestamp = await self.__loop.run_in_executor(
+    #             None, self.__encoder.encode, data, force_keyframe
+    #         )
+    #     else:
+    #         payloads, timestamp = self.__encoder.pack(data)
+    #
+    #     return RTCEncodedFrame(payloads, timestamp, audio_level)
 
     async def _retransmit(self, sequence_number: int) -> None:
         """
@@ -361,8 +398,8 @@ class RTCRtpSender:
 
                     # set header extensions
                     packet.extensions.abs_send_time = (
-                        clock.current_ntp_time() >> 14
-                    ) & 0x00FFFFFF
+                                                              clock.current_ntp_time() >> 14
+                                                      ) & 0x00FFFFFF
                     packet.extensions.mid = self.__mid
                     if enc_frame.audio_level is not None:
                         packet.extensions.audio_level = (False, -enc_frame.audio_level)
