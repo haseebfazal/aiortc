@@ -12,9 +12,9 @@ from ..mediastreams import VIDEO_CLOCK_RATE, VIDEO_TIME_BASE, convert_timebase
 from ._vpx import ffi, lib
 from .base import Decoder, Encoder
 
-DEFAULT_BITRATE = 500000  # 500 kbps
-MIN_BITRATE = 250000  # 250 kbps
-MAX_BITRATE = 1500000  # 1.5 Mbps
+DEFAULT_BITRATE = 13000000  # 4 Mbps
+MIN_BITRATE = 13000000  # 4.5 Mbps
+MAX_BITRATE = 13000000  # 3.5 Mbps
 
 MAX_FRAME_RATE = 30
 PACKET_MAX = 1300
@@ -24,13 +24,16 @@ DESCRIPTOR_T = TypeVar("DESCRIPTOR_T", bound="VpxPayloadDescriptor")
 
 def number_of_threads(pixels: int, cpus: int) -> int:
     if pixels >= 1920 * 1080 and cpus > 8:
-        return 8
+        return 24
     elif pixels > 1280 * 960 and cpus >= 6:
         return 3
     elif pixels > 640 * 480 and cpus >= 3:
         return 2
     else:
         return 1
+
+# def number_of_threads(pixels: int, cpus: int) -> int:
+#     return 16
 
 
 class VpxPayloadDescriptor:
@@ -270,15 +273,36 @@ class Vp8Encoder(Encoder):
             self.cfg.rc_end_usage = lib.VPX_CBR
             self.cfg.rc_min_quantizer = 2
             self.cfg.rc_max_quantizer = 56
-            self.cfg.rc_undershoot_pct = 100
-            self.cfg.rc_overshoot_pct = 15
-            self.cfg.rc_buf_initial_sz = 500
-            self.cfg.rc_buf_optimal_sz = 600
-            self.cfg.rc_buf_sz = 1000
+            self.cfg.rc_undershoot_pct = 0
+            self.cfg.rc_overshoot_pct = 0
+            self.cfg.rc_buf_initial_sz = 300
+            self.cfg.rc_buf_optimal_sz = 400
+            self.cfg.rc_buf_sz = 500
+            # self.cfg.rc_buf_initial_sz = 500
+            # self.cfg.rc_buf_optimal_sz = 600
+            # self.cfg.rc_buf_sz = 1000
             self.cfg.kf_mode = lib.VPX_KF_AUTO
-            self.cfg.kf_max_dist = 3000
+            self.cfg.kf_max_dist = 150
+            # self.cfg.kf_max_dist = 3000
+
             self.__update_config()
             _vpx_assert(lib.vpx_codec_enc_init(self.codec, self.cx, self.cfg, 0))
+
+            # lib.vpx_codec_control_(
+            #     self.codec, lib.VP8E_SET_NOISE_SENSITIVITY, ffi.cast("int", 0)
+            # )
+            # lib.vpx_codec_control_(
+            #     self.codec, lib.VP8E_SET_STATIC_THRESHOLD, ffi.cast("int", 1)
+            # )
+            # lib.vpx_codec_control_(
+            #     self.codec, lib.VP8E_SET_CPUUSED, ffi.cast("int", -8)
+            # )
+            # lib.vpx_codec_control_(
+            #     self.codec,
+            #     lib.VP8E_SET_TOKEN_PARTITIONS,
+            #     ffi.cast("int", lib.VP8_ONE_TOKENPARTITION),
+            # )
+
 
             lib.vpx_codec_control_(
                 self.codec, lib.VP8E_SET_NOISE_SENSITIVITY, ffi.cast("int", 4)
@@ -366,6 +390,8 @@ class Vp8Encoder(Encoder):
         Target bitrate in bits per second.
         """
         return self.__target_bitrate
+        # return MAX_BITRATE
+
 
     @target_bitrate.setter
     def target_bitrate(self, bitrate: int) -> None:
@@ -373,6 +399,9 @@ class Vp8Encoder(Encoder):
         if bitrate != self.__target_bitrate:
             self.__target_bitrate = bitrate
             self.__update_config_needed = True
+
+        # bitrate = MAX_BITRATE
+
 
     @classmethod
     def _packetize(cls, buffer: bytes, picture_id: int) -> List[bytes]:

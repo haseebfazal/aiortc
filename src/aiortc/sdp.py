@@ -507,10 +507,12 @@ class SessionDescription:
                         codec = RTCRtpCodecParameters(
                             # mimeType=current_media.kind + "/" + bits[0],
                             mimeType="video/h264",
+                            # mimeType="video/VP8",
                             channels=channels,
                             clockRate=int(bits[1]),
                             payloadType=int(format_id),
                         )
+                        # print(bits[0])
                         current_media.rtp.codecs.append(codec)
                     elif attr == "sctpmap":
                         format_id, format_desc = value.split(" ", 1)

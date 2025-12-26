@@ -12,13 +12,15 @@ from av.packet import Packet
 from ..jitterbuffer import JitterFrame
 from ..mediastreams import VIDEO_TIME_BASE, convert_timebase
 from .base import Decoder, Encoder
+import struct
 
 logger = logging.getLogger(__name__)
+#
 
-Bitrate_constant = 6000000
-DEFAULT_BITRATE = Bitrate_constant
-MIN_BITRATE = Bitrate_constant
-MAX_BITRATE = Bitrate_constant
+DEFAULT_BITRATE = 20000000
+MIN_BITRATE = 12000000
+MAX_BITRATE = 22000000
+
 
 MAX_FRAME_RATE = 30
 PACKET_MAX = 1300
@@ -103,31 +105,9 @@ class H264PayloadDescriptor:
         return obj, output
 
 
-# class H264Decoder(Decoder):
-#     def __init__(self) -> None:
-#         self.codec = av.CodecContext.create("h264", "r")
-#
-#     def decode(self, encoded_frame: JitterFrame) -> List[Frame]:
-#         try:
-#             packet = av.Packet(encoded_frame.data)
-#             packet.pts = encoded_frame.timestamp
-#             packet.time_base = VIDEO_TIME_BASE
-#             frames = self.codec.decode(packet)
-#         except av.AVError as e:
-#             logger.warning(
-#                 "H264Decoder() failed to decode, skipping package: " + str(e)
-#             )
-#             return []
-#
-#         return frames
-
 class H264Decoder(Decoder):
-    def _init_(self) -> None:
+    def __init__(self) -> None:
         self.codec = av.CodecContext.create("h264", "r")
-        # self.gop_size = self.codec.gop_size
-        self.frame_count = 0  # Add this line to initialize the frame count
-        # self.frame_file_count = 1
-        # self.start_time = time.time()
 
     def decode(self, encoded_frame: JitterFrame) -> List[Frame]:
         try:
@@ -135,30 +115,6 @@ class H264Decoder(Decoder):
             packet.pts = encoded_frame.timestamp
             packet.time_base = VIDEO_TIME_BASE
             frames = self.codec.decode(packet)
-            # For calculating FPS manually:
-            # self.frame_count += 1
-            # elapsed_time = time.time() - self.start_time
-            # if elapsed_time > 1:  # Check every second
-            #     fps = self.frame_count / elapsed_time
-            #     print(f"FPS: {fps:.2f}")
-            #     self.frame_count = 0
-            #     self.start_time = time.time()
-            # # For calculating FPS manually:
-            #
-            # # For calculating GOP manually:
-            for frame in frames:
-                # img_array = frame.to_ndarray(format="bgr24")
-                if frame.pict_type == av.video.frame.PictureType.I:  # Check if the frame is an I-frame
-                    print(f"The GOP size is: {self.frame_count}")
-                    # filename = f"screendecode/{self.frame_file_count:04}_i.png"
-                    # self.frame_file_count += 1
-                    self.frame_count = 0  # Reset the frame count after finding an I-frame
-                else:
-                    self.frame_count += 1
-                    # filename = f"screendecode/{self.frame_file_count:04}.png"
-                    # self.frame_file_count += 1
-                # cv2.imwrite(filename, img_array)
-            # For calculating GOP manually:
         except av.AVError as e:
             logger.warning(
                 "H264Decoder() failed to decode, skipping package: " + str(e)
@@ -169,7 +125,7 @@ class H264Decoder(Decoder):
 
 
 def create_encoder_context(
-    codec_name: str, width: int, height: int, bitrate: int
+        codec_name: str, width: int, height: int, bitrate: int
 ) -> Tuple[av.CodecContext, bool]:
     codec = av.CodecContext.create(codec_name, "w")
     codec.width = width
@@ -180,61 +136,32 @@ def create_encoder_context(
     codec.framerate = fractions.Fraction(MAX_FRAME_RATE, 1)
     codec.time_base = fractions.Fraction(1, MAX_FRAME_RATE)
 
-    # GOP size for 1.5-second keyframe interval at MAX_FRAME_RATE
-    # codec.gop_size = 1.5 * MAX_FRAME_RATE
-    # codec.options = {
-    #     "profile": "high",
-    #     "level": "4.2" if MAX_FRAME_RATE == 60 else "4.0",
-    #     "tune": "zerolatency",
-    #     "preset": "ultrafast",
-    #     "bframes": "0",
-    #     # "ssim": "true",  # SSIM calculation for quality check
-    #     # "psnr": "true",  # PSNR calculation for quality check
-    # }
-    # codec.options = {
-    #     "profile": "baseline",
-    #     "level": "31",
-    #     "tune": "zerolatency",  # does nothing using h264_omx
-    # }
-    # print("codec bitrate", bitrate)
-    # codec.options = {
-    #     # 'profile': 'baseline',
-    #     'preset': 'ultrafast',  # Fastest encoding with reduced delay
-    #     'tune': 'zerolatency',  # Reduce encoder latency
-    #     # "level": "31",
-    #     'x264opts': 'nal-hrd=cbr:force-cfr=1',
-    #     'bf': '0',  # Disable B-frames to reduce complexity and latency
-    #     'g': '30',
-    #     'refs': '1',
-    #     'rc-lookahead': '0',
-    #     'threads': 'auto',
-    #     # 'slice-max-size': '1300',
-    #     'nal-hrd': 'cbr',
-    #     'force-cfr': '1',
-    #     # 'vbv-bufsize': str(bitrate // MAX_FRAME_RATE),  # Set buffer size to one second of video at the target bitrate
-    #     'vbv-bufsize': str(bitrate //  MAX_FRAME_RATE),  # Set buffer size to one second of video at the target bitrate
-    #     'vbv-maxrate': str(bitrate),
-    # }
     codec.options = {
-        'preset': 'ultrafast',  # Use 'ultrafast' for minimal encoding delay
-        'tune': 'zerolatency',  # Tune for zero latency
-        'g': '45',  # GOP size
-        'refs': '1',  # Reference frames
-        'rc-lookahead': '0',  # Lookahead frames for rate control
+        'preset': 'ultrafast', # Use 'ultrafast' for minimal encoding delay --
+        'tune': 'zerolatency', # Tune for zero latency --
+        'g': '45',  # GOP size --
+        'refs': '1',  # Reference frames --
+        'rc-lookahead': '0',  # Lookahead frames for rate control --
         # 'threads': 'auto',  # Use automatic threading
-        'nal-hrd': 'cbr',  # Constant Bitrate mode
-        'force-cfr': '1',  # Force constant framerate
-        'vbv-bufsize': str(bitrate // MAX_FRAME_RATE),  # Buffer size for the rate control
+        'nal-hrd': 'cbr',  # Constant Bitrate mode --
+        'force-cfr': '1',  # Force constant framerate --
+        'vbv-bufsize': str(bitrate // MAX_FRAME_RATE), # Buffer size for the rate control
         'vbv-maxrate': str(bitrate // MAX_FRAME_RATE),  # Maximum bitrate
-        'rc': 'cbr',  # Constant bitrate, low-delay high quality
-        'zerolatency': '1',  # Enable zero latency
-        'forced-idr': '0',  # Force IDR frames
+        'rc': 'cbr',   # Constant bitrate, low-delay high quality
+        'zerolatency': '1',   # Enable zero latency
+        'forced-idr': '0', # Force IDR frames
         # 'pix_fmt': 'yuv420p',  # Pixel format
-        'b:v': f'{bitrate}',  # Bitrate
-        'minrate': f'{bitrate}',  # Minimum bitrate
-        'maxrate': f'{bitrate}',  # Maximum bitrate
+        'b:v': f'{bitrate}', # Bitrate
+        # 'minrate': f'{bitrate}', # Minimum bitrate
+        # 'maxrate': f'{bitrate}', # Maximum bitrate
         'bufsize': f'{bitrate // MAX_FRAME_RATE}',  # Buffer size
+        # 'psnr': '1',  # Enable PSNR calculation
+        # 'x264-params': 'psnr=1:ssim=1'
+        # 'ssim': '1',  # Enable SSIM calculation
+
     }
+
+
 
     codec.open()
     return codec, codec_name == "libx264"
@@ -271,10 +198,10 @@ class H264Encoder(Encoder):
         while offset < len(data):
             if num_larger_packets > 0:
                 num_larger_packets -= 1
-                payload = data[offset : offset + package_size + 1]
+                payload = data[offset: offset + package_size + 1]
                 offset += package_size + 1
             else:
-                payload = data[offset : offset + package_size]
+                payload = data[offset: offset + package_size]
                 offset += package_size
 
             if offset == len(data):
@@ -289,7 +216,7 @@ class H264Encoder(Encoder):
 
     @staticmethod
     def _packetize_stap_a(
-        data: bytes, packages_iterator: Iterator[bytes]
+            data: bytes, packages_iterator: Iterator[bytes]
     ) -> Tuple[bytes, bytes]:
         counter = 0
         available_size = PACKET_MAX - STAP_A_HEADER_SIZE
@@ -341,11 +268,11 @@ class H264Encoder(Encoder):
             # Find the end of the NAL unit (end of buffer OR next start code)
             i = buf.find(b"\x00\x00\x01", i)
             if i == -1:
-                yield buf[nal_start : len(buf)]
+                yield buf[nal_start: len(buf)]
                 return
             elif buf[i - 1] == 0:
                 # 4-byte start code case, jump back one byte
-                yield buf[nal_start : i - 1]
+                yield buf[nal_start: i - 1]
             else:
                 yield buf[nal_start:i]
 
@@ -366,14 +293,15 @@ class H264Encoder(Encoder):
         return packetized_packages
 
     def _encode_frame(
-        self, frame: av.VideoFrame, force_keyframe: bool
+            self, frame: av.VideoFrame, force_keyframe: bool
     ) -> Iterator[bytes]:
+
         if self.codec and (
-            frame.width != self.codec.width
-            or frame.height != self.codec.height
-            # we only adjust bitrate if it changes by over 10%
-            or abs(self.target_bitrate - self.codec.bit_rate) / self.codec.bit_rate
-            > 0.1
+                frame.width != self.codec.width
+                or frame.height != self.codec.height
+                # we only adjust bitrate if it changes by over 10%
+                or abs(self.target_bitrate - self.codec.bit_rate) / self.codec.bit_rate
+                > 0.1
         ):
             self.buffer_data = b""
             self.buffer_pts = None
@@ -382,9 +310,11 @@ class H264Encoder(Encoder):
         if force_keyframe:
             # force a complete image
             frame.pict_type = av.video.frame.PictureType.I
+            # print("I-frame was Inserted -------------------------------------------------------")
         else:
             # reset the picture type, otherwise no B-frames are produced
             frame.pict_type = av.video.frame.PictureType.NONE
+            # print("P-frame was Inserted ------------------------------------------")
 
         if self.codec is None:
             try:
@@ -401,6 +331,8 @@ class H264Encoder(Encoder):
 
         data_to_send = b""
         for package in self.codec.encode(frame):
+            # if package.is_keyframe:
+            # print(f"I-frame automatically generated by encoder, Timestamp: {package.pts}")
             package_bytes = bytes(package)
             if self.codec_buffering:
                 # delay sending to ensure we accumulate all packages
@@ -418,7 +350,7 @@ class H264Encoder(Encoder):
             yield from self._split_bitstream(data_to_send)
 
     def encode(
-        self, frame: Frame, force_keyframe: bool = False
+            self, frame: Frame, force_keyframe: bool = False
     ) -> Tuple[List[bytes], int]:
         assert isinstance(frame, av.VideoFrame)
         packages = self._encode_frame(frame, force_keyframe)
@@ -440,10 +372,16 @@ class H264Encoder(Encoder):
 
     @target_bitrate.setter
     def target_bitrate(self, bitrate: int) -> None:
+        # global shm_a
+        print("Receiver side Bandwidth: ", bitrate)
         bitrate = max(MIN_BITRATE, min(bitrate, MAX_BITRATE))
+        #Get EVCA values, use lookup
+
         self.__target_bitrate = bitrate
 
 
 def h264_depayload(payload: bytes) -> bytes:
     descriptor, data = H264PayloadDescriptor.parse(payload)
     return data
+
+

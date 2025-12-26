@@ -1,7 +1,8 @@
+import audioop
 import fractions
-from typing import List, Tuple
+from typing import List, Optional, Tuple
 
-from av import AudioFrame, AudioResampler
+from av import AudioFrame
 from av.frame import Frame
 from av.packet import Packet
 
@@ -56,14 +57,7 @@ class OpusEncoder(Encoder):
             "unsigned char []", SAMPLES_PER_FRAME * CHANNELS * SAMPLE_WIDTH
         )
         self.buffer = ffi.buffer(self.cdata)
-
-        # Create our own resampler to control the frame size.
-        self.resampler = AudioResampler(
-            format="s16",
-            layout="stereo",
-            rate=SAMPLE_RATE,
-            frame_size=SAMPLES_PER_FRAME,
-        )
+        self.rate_state: Optional[Tuple[int, Tuple[Tuple[int, int], ...]]] = None
 
     def __del__(self) -> None:
         lib.opus_encoder_destroy(self.encoder)
@@ -75,25 +69,36 @@ class OpusEncoder(Encoder):
         assert frame.format.name == "s16"
         assert frame.layout.name in ["mono", "stereo"]
 
-        # Send frame through resampler and encoder.
-        payloads = []
-        timestamp = None
-        for frame in self.resampler.resample(frame):
-            data = bytes(frame.planes[0])
-            length = lib.opus_encode(
-                self.encoder,
-                ffi.cast("int16_t*", ffi.from_buffer(data)),
-                SAMPLES_PER_FRAME,
-                self.cdata,
-                len(self.cdata),
+        channels = len(frame.layout.channels)
+        data = bytes(frame.planes[0])
+        timestamp = frame.pts
+
+        # resample at 48 kHz
+        if frame.sample_rate != SAMPLE_RATE:
+            data, self.rate_state = audioop.ratecv(
+                data,
+                SAMPLE_WIDTH,
+                channels,
+                frame.sample_rate,
+                SAMPLE_RATE,
+                self.rate_state,
             )
-            assert length > 0
+            timestamp = (timestamp * SAMPLE_RATE) // frame.sample_rate
 
-            payloads.append(self.buffer[0:length])
-            if timestamp is None:
-                timestamp = frame.pts
+        # convert to stereo
+        if channels == 1:
+            data = audioop.tostereo(data, SAMPLE_WIDTH, 1, 1)
 
-        return payloads, timestamp
+        length = lib.opus_encode(
+            self.encoder,
+            ffi.cast("int16_t*", ffi.from_buffer(data)),
+            SAMPLES_PER_FRAME,
+            self.cdata,
+            len(self.cdata),
+        )
+        assert length > 0
+
+        return [self.buffer[0:length]], timestamp
 
     def pack(self, packet: Packet) -> Tuple[List[bytes], int]:
         timestamp = convert_timebase(packet.pts, packet.time_base, TIME_BASE)
