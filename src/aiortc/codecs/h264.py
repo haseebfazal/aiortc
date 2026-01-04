@@ -12,14 +12,31 @@ from av.packet import Packet
 from ..jitterbuffer import JitterFrame
 from ..mediastreams import VIDEO_TIME_BASE, convert_timebase
 from .base import Decoder, Encoder
+from multiprocessing import shared_memory
 import struct
-
+import os
 logger = logging.getLogger(__name__)
-#
+
+#Environment variable
+ENABLE_SHM_RATECONTROL = os.getenv("ENABLE_EVCA_BITRATE", "0") == "1"
+
+# Declare a global shared memory object
+SHM_NAME = "bitrate_shm"
+BITRATE_SIZE = 4  # Size of an integer (4 bytes)
+
+# Initialize the shared memory globally
+try:
+    shm_a = shared_memory.SharedMemory(name=SHM_NAME, create=True, size=BITRATE_SIZE)
+except FileExistsError:
+    shm_a = shared_memory.SharedMemory(name=SHM_NAME)
+
+
+shm_bitrate_rev= "bitrate_send_shm"
+shm_rev = shared_memory.SharedMemory(name=shm_bitrate_rev)
 
 DEFAULT_BITRATE = 20000000
 MIN_BITRATE = 12000000
-MAX_BITRATE = 22000000
+MAX_BITRATE = 16000000
 
 
 MAX_FRAME_RATE = 30
@@ -372,11 +389,16 @@ class H264Encoder(Encoder):
 
     @target_bitrate.setter
     def target_bitrate(self, bitrate: int) -> None:
-        # global shm_a
-        print("Receiver side Bandwidth: ", bitrate)
         bitrate = max(MIN_BITRATE, min(bitrate, MAX_BITRATE))
-        #Get EVCA values, use lookup
-
+        #Get Bitrate based on complexity
+        print("GCC Bandwidth : ", bitrate)
+        
+        #For custom rate-controllers
+        if ENABLE_SHM_RATECONTROL:
+            struct.pack_into('i', shm_a.buf, 0, bitrate)
+            print("Complexity-based Bandwidth: ", bitrate)
+            bitrate = (struct.unpack_from('i', shm_rev.buf, 0)[0])
+        
         self.__target_bitrate = bitrate
 
 
